@@ -10,6 +10,7 @@ import os from 'os';
 import path from 'path';
 
 import { logger } from '../src/logger.js';
+import { readEnvFile } from '../src/env.js';
 import {
   getPlatform,
   getNodePath,
@@ -20,6 +21,16 @@ import {
   isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+/**
+ * Read CONTAINER_RUNTIME from .env so the service manager config can include it.
+ * The app reads this at module-init time via process.env (not via readEnvFile),
+ * so the service manager must set it explicitly in the process environment.
+ */
+function getContainerRuntime(): string | undefined {
+  const env = readEnvFile(['CONTAINER_RUNTIME']);
+  return env.CONTAINER_RUNTIME;
+}
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -104,7 +115,14 @@ function setupLaunchd(
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
         <key>HOME</key>
-        <string>${homeDir}</string>
+        <string>${homeDir}</string>${(() => {
+          const runtime = getContainerRuntime();
+          return runtime
+            ? `
+        <key>CONTAINER_RUNTIME</key>
+        <string>${runtime}</string>`
+            : '';
+        })()}
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -237,6 +255,11 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  const containerRuntime = getContainerRuntime();
+  const runtimeEnvLine = containerRuntime
+    ? `\nEnvironment=CONTAINER_RUNTIME=${containerRuntime}`
+    : '';
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
@@ -248,7 +271,7 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin${runtimeEnvLine}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -319,6 +342,8 @@ function setupNohupFallback(
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
   const pidFile = path.join(projectRoot, 'nanoclaw.pid');
 
+  const containerRuntime = getContainerRuntime();
+
   const lines = [
     '#!/bin/bash',
     '# start-nanoclaw.sh — Start NanoClaw without systemd',
@@ -328,6 +353,9 @@ function setupNohupFallback(
     '',
     `cd ${JSON.stringify(projectRoot)}`,
     '',
+    ...(containerRuntime
+      ? [`export CONTAINER_RUNTIME=${JSON.stringify(containerRuntime)}`, '']
+      : []),
     '# Stop existing instance if running',
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
     `  OLD_PID=$(cat ${JSON.stringify(pidFile)} 2>/dev/null || echo "")`,

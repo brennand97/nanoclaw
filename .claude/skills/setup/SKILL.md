@@ -195,6 +195,8 @@ If service already running: unload first.
 
 Run `npx tsx setup/index.ts --step service` and parse the status block.
 
+The service step automatically reads `CONTAINER_RUNTIME` from `.env` and includes it in the generated service config (systemd unit, launchd plist, or nohup wrapper). This is required because the app reads `process.env.CONTAINER_RUNTIME` at module-init time — before the `.env` file is parsed — so the service manager must set it explicitly. If the user chose Podman in step 3, the generated service file will include `Environment=CONTAINER_RUNTIME=podman` (systemd), a `<key>CONTAINER_RUNTIME</key>` entry (launchd), or an `export CONTAINER_RUNTIME=podman` line (nohup wrapper).
+
 **If FALLBACK=wsl_no_systemd:** WSL without systemd detected. Tell user they can either enable systemd in WSL (`echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf` then restart WSL) or use the generated `start-nanoclaw.sh` wrapper.
 
 **If DOCKER_GROUP_STALE=true:** (Docker only — does not apply to Podman.) The user was added to the docker group after their session started — the systemd service can't reach the Docker socket. Ask user to run these two commands:
@@ -238,6 +240,8 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 ## Troubleshooting
 
 **Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+
+**Service crashes with "Container runtime failed to start" when using Podman:** The service config is missing `CONTAINER_RUNTIME=podman`. This happens when the service file was written before `CONTAINER_RUNTIME=podman` was added to `.env`, or was manually created. Fix: re-run step 7 (`npx tsx setup/index.ts --step service`) which reads the runtime from `.env` and regenerates the service config. Or manually add `Environment=CONTAINER_RUNTIME=podman` to the systemd unit (`~/.config/systemd/user/nanoclaw.service`) and run `systemctl --user daemon-reload && systemctl --user restart nanoclaw`.
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), `podman info` (Podman), or `sudo systemctl start docker` (Linux Docker). Check container logs in `groups/main/logs/container-*.log`.
 
