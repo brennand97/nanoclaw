@@ -82,7 +82,36 @@ export async function run(args: string[]): Promise<void> {
     }
   }
 
-  if (!['apple-container', 'docker'].includes(runtime)) {
+  if (runtime === 'podman') {
+    if (!commandExists('podman')) {
+      emitStatus('SETUP_CONTAINER', {
+        RUNTIME: runtime,
+        IMAGE: image,
+        BUILD_OK: false,
+        TEST_OK: false,
+        STATUS: 'failed',
+        ERROR: 'runtime_not_available',
+        LOG: 'logs/setup.log',
+      });
+      process.exit(2);
+    }
+    try {
+      execSync('podman info', { stdio: 'ignore' });
+    } catch {
+      emitStatus('SETUP_CONTAINER', {
+        RUNTIME: runtime,
+        IMAGE: image,
+        BUILD_OK: false,
+        TEST_OK: false,
+        STATUS: 'failed',
+        ERROR: 'runtime_not_available',
+        LOG: 'logs/setup.log',
+      });
+      process.exit(2);
+    }
+  }
+
+  if (!['apple-container', 'docker', 'podman'].includes(runtime)) {
     emitStatus('SETUP_CONTAINER', {
       RUNTIME: runtime,
       IMAGE: image,
@@ -96,8 +125,8 @@ export async function run(args: string[]): Promise<void> {
   }
 
   const buildCmd =
-    runtime === 'apple-container' ? 'container build' : 'docker build';
-  const runCmd = runtime === 'apple-container' ? 'container' : 'docker';
+    runtime === 'apple-container' ? 'container build' : `${runtime} build`;
+  const runCmd = runtime === 'apple-container' ? 'container' : runtime;
 
   // Build
   let buildOk = false;

@@ -8,8 +8,8 @@ import os from 'os';
 
 import { logger } from './logger.js';
 
-/** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+/** The container runtime binary name (override with CONTAINER_RUNTIME env var). */
+export const CONTAINER_RUNTIME_BIN = process.env.CONTAINER_RUNTIME || 'docker';
 
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
@@ -19,6 +19,9 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
+ * Podman rootless (Linux, pasta networking): no docker0 bridge exists, so the
+ *   fallback to 0.0.0.0 covers this case — containers reach the host via the
+ *   host-gateway address that pasta provides.
  */
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
@@ -72,30 +75,22 @@ export function ensureContainerRuntimeRunning(): void {
     logger.debug('Container runtime already running');
   } catch (err) {
     logger.error({ err }, 'Failed to reach container runtime');
+    const rt = CONTAINER_RUNTIME_BIN;
+    const line1 = `║  1. Ensure ${rt} is installed and running`;
+    const line2 = `║  2. Run: ${rt} info`;
+    const boxWidth = 66; // total width including both ║ borders
+    const pad = (s: string) =>
+      s + ' '.repeat(Math.max(0, boxWidth - 1 - s.length)) + '║';
+    console.error('\n╔' + '═'.repeat(boxWidth - 2) + '╗');
+    console.error(pad('║  FATAL: Container runtime failed to start'));
+    console.error(pad('║'));
     console.error(
-      '\n╔════════════════════════════════════════════════════════════════╗',
+      pad('║  Agents cannot run without a container runtime. To fix:'),
     );
-    console.error(
-      '║  FATAL: Container runtime failed to start                      ║',
-    );
-    console.error(
-      '║                                                                ║',
-    );
-    console.error(
-      '║  Agents cannot run without a container runtime. To fix:        ║',
-    );
-    console.error(
-      '║  1. Ensure Docker is installed and running                     ║',
-    );
-    console.error(
-      '║  2. Run: docker info                                           ║',
-    );
-    console.error(
-      '║  3. Restart NanoClaw                                           ║',
-    );
-    console.error(
-      '╚════════════════════════════════════════════════════════════════╝\n',
-    );
+    console.error(pad(line1));
+    console.error(pad(line2));
+    console.error(pad('║  3. Restart NanoClaw'));
+    console.error('╚' + '═'.repeat(boxWidth - 2) + '╝\n');
     throw new Error('Container runtime is required but failed to start');
   }
 }

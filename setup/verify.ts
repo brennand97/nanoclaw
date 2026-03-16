@@ -92,7 +92,12 @@ export async function run(_args: string[]): Promise<void> {
       execSync('docker info', { stdio: 'ignore' });
       containerRuntime = 'docker';
     } catch {
-      // No runtime
+      try {
+        execSync('podman info', { stdio: 'ignore' });
+        containerRuntime = 'podman';
+      } catch {
+        // No runtime
+      }
     }
   }
 
@@ -101,7 +106,11 @@ export async function run(_args: string[]): Promise<void> {
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
+    if (
+      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_USE_BEDROCK)=/m.test(
+        envContent,
+      )
+    ) {
       credentials = 'configured';
     }
   }

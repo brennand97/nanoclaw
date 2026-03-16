@@ -14,6 +14,7 @@ import {
   getPlatform,
   getNodePath,
   getServiceManager,
+  commandExists,
   hasSystemd,
   isRoot,
   isWSL,
@@ -184,6 +185,9 @@ function killOrphanedProcesses(projectRoot: string): void {
  * Only relevant on Linux with user-level systemd (not root, not macOS, not WSL nohup).
  */
 function checkDockerGroupStale(): boolean {
+  // Only relevant when Docker is the container runtime; Podman doesn't use a docker group.
+  if (!commandExists('docker')) return false;
+
   try {
     execSync('systemd-run --user --pipe --wait docker info', {
       stdio: 'pipe',
