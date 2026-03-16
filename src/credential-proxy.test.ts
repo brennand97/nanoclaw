@@ -189,4 +189,43 @@ describe('credential-proxy', () => {
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
   });
+
+  it('Bedrock mode injects Bearer token from AWS_BEARER_TOKEN_BEDROCK', async () => {
+    // In Bedrock mode the proxy forwards to bedrock-runtime.{region}.amazonaws.com.
+    // We can't point that at localhost, so we verify:
+    // 1. detectAuthMode correctly returns 'bedrock'
+    // 2. The proxy starts without error in Bedrock mode
+    Object.assign(mockEnv, {
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_BEARER_TOKEN_BEDROCK: 'bedrock-api-key-12345',
+      AWS_REGION: 'us-east-1',
+    });
+
+    const { detectAuthMode } = await import('./credential-proxy.js');
+    expect(detectAuthMode()).toBe('bedrock');
+
+    // Proxy should start successfully in Bedrock mode
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+    expect(proxyPort).toBeGreaterThan(0);
+  });
+
+  it('detectAuthMode returns bedrock when CLAUDE_CODE_USE_BEDROCK=1', async () => {
+    Object.assign(mockEnv, {
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      ANTHROPIC_API_KEY: 'sk-ant-real-key', // Should be ignored when Bedrock is set
+    });
+
+    const { detectAuthMode } = await import('./credential-proxy.js');
+    expect(detectAuthMode()).toBe('bedrock');
+  });
+
+  it('detectAuthMode returns api-key when Bedrock is not set', async () => {
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+    });
+
+    const { detectAuthMode } = await import('./credential-proxy.js');
+    expect(detectAuthMode()).toBe('api-key');
+  });
 });

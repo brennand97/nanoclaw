@@ -3,12 +3,17 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
- * Two auth modes:
+ * Three auth modes:
  *   API key:  Proxy injects x-api-key on every request.
  *   OAuth:    Container CLI exchanges its placeholder token for a temp
  *             API key via /api/oauth/claude_cli/create_api_key.
  *             Proxy injects real OAuth token on that exchange request;
  *             subsequent requests carry the temp key which is valid as-is.
+ *   Bedrock:  Container uses CLAUDE_CODE_USE_BEDROCK=1 with
+ *             CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 and routes through
+ *             ANTHROPIC_BEDROCK_BASE_URL pointing to this proxy.
+ *             Proxy injects the real AWS_BEARER_TOKEN_BEDROCK as a
+ *             Bearer token and forwards to the Bedrock endpoint.
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -17,7 +22,7 @@ import { request as httpRequest, RequestOptions } from 'http';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+export type AuthMode = 'api-key' | 'oauth' | 'bedrock';
 
 export interface ProxyConfig {
   authMode: AuthMode;
@@ -32,15 +37,28 @@ export function startCredentialProxy(
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
+    'CLAUDE_CODE_USE_BEDROCK',
+    'AWS_BEARER_TOKEN_BEDROCK',
+    'AWS_REGION',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const authMode: AuthMode =
+    secrets.CLAUDE_CODE_USE_BEDROCK === '1'
+      ? 'bedrock'
+      : secrets.ANTHROPIC_API_KEY
+        ? 'api-key'
+        : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  // Bedrock mode: forward to the regional Bedrock runtime endpoint.
+  // Non-Bedrock: forward to ANTHROPIC_BASE_URL or api.anthropic.com.
+  const upstreamUrl =
+    authMode === 'bedrock'
+      ? new URL(
+          `https://bedrock-runtime.${secrets.AWS_REGION || 'us-east-1'}.amazonaws.com`,
+        )
+      : new URL(secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -66,6 +84,15 @@ export function startCredentialProxy(
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+        } else if (authMode === 'bedrock') {
+          // Bedrock bearer token mode: inject Authorization header on every request.
+          // The container sets CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 so the SDK sends
+          // requests without AWS auth; we inject the real bearer token here.
+          delete headers['authorization'];
+          if (secrets.AWS_BEARER_TOKEN_BEDROCK) {
+            headers['authorization'] =
+              `Bearer ${secrets.AWS_BEARER_TOKEN_BEDROCK}`;
+          }
         } else {
           // OAuth mode: replace placeholder Bearer token with the real one
           // only when the container actually sends an Authorization header
@@ -120,6 +147,7 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK']);
+  if (secrets.CLAUDE_CODE_USE_BEDROCK === '1') return 'bedrock';
   return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
 }
