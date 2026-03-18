@@ -1,0 +1,17 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+[extend]
+useDefault = true
+
+# Paths that should never be scanned (gitignored anyway, but belt-and-suspenders)
+[allowlist]
+paths = [
+  '''\.env$''',
+  '''data/''',
+  '''store/''',
+  '''logs/''',
+  '''dist/''',
+  '''node_modules/''',
+  '''\.keys\.json$''',
+]

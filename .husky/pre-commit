@@ -1,1 +1,6 @@
 npm run format:fix
+
+# Secret scanning - block commits containing secrets
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --verbose
+fi
